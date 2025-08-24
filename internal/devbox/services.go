@@ -3,11 +3,12 @@ package devbox
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"text/tabwriter"
 
-	"go.jetpack.io/devbox/internal/boxcli/usererr"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/services"
+	"go.jetify.com/devbox/internal/boxcli/usererr"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/services"
 )
 
 func (d *Devbox) StartServices(
@@ -170,6 +171,31 @@ func (d *Devbox) RestartServices(
 	return nil
 }
 
+func (d *Devbox) AttachToProcessManager(ctx context.Context) error {
+	if !services.ProcessManagerIsRunning(d.projectDir) {
+		return usererr.New("Process manager is not running. Run `devbox services up` to start it.")
+	}
+
+	err := initDevboxUtilityProject(ctx, d.stderr)
+	if err != nil {
+		return err
+	}
+
+	processComposeBinPath, err := utilityLookPath("process-compose")
+	if err != nil {
+		return err
+	}
+
+	return services.AttachToProcessManager(
+		ctx,
+		d.stderr,
+		d.projectDir,
+		services.ProcessComposeOpts{
+			BinPath: processComposeBinPath,
+		},
+	)
+}
+
 func (d *Devbox) StartProcessManager(
 	ctx context.Context,
 	runInCurrentShell bool,
@@ -191,6 +217,9 @@ func (d *Devbox) StartProcessManager(
 		}
 		for _, flag := range processComposeOpts.ExtraFlags {
 			args = append(args, "--pcflags", flag)
+		}
+		if processComposeOpts.ProcessComposePort != 0 {
+			args = append(args, "--pcport", strconv.Itoa(processComposeOpts.ProcessComposePort))
 		}
 
 		return d.runDevboxServicesScript(ctx, args)
@@ -229,9 +258,10 @@ func (d *Devbox) StartProcessManager(
 		svcs,
 		d.projectDir,
 		services.ProcessComposeOpts{
-			BinPath:    processComposeBinPath,
-			Background: processComposeOpts.Background,
-			ExtraFlags: processComposeOpts.ExtraFlags,
+			BinPath:            processComposeBinPath,
+			Background:         processComposeOpts.Background,
+			ExtraFlags:         processComposeOpts.ExtraFlags,
+			ProcessComposePort: processComposeOpts.ProcessComposePort,
 		},
 	)
 }

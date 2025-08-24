@@ -4,6 +4,7 @@
 package telemetry
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -24,13 +25,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	segment "github.com/segmentio/analytics-go"
-	"go.jetpack.io/devbox/internal/devbox/providers/identity"
-	"go.jetpack.io/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/boxcli/usererr"
+	"go.jetify.com/devbox/internal/devbox/providers/identity"
+	"go.jetify.com/devbox/nix"
 
-	"go.jetpack.io/devbox/internal/build"
-	"go.jetpack.io/devbox/internal/envir"
-	"go.jetpack.io/devbox/internal/redact"
-	"go.jetpack.io/devbox/internal/xdg"
+	"go.jetify.com/devbox/internal/build"
+	"go.jetify.com/devbox/internal/envir"
+	"go.jetify.com/devbox/internal/redact"
+	"go.jetify.com/devbox/internal/xdg"
 )
 
 const appName = "devbox"
@@ -138,14 +140,12 @@ func commandEvent(meta Metadata) (id string, msg *segment.Track) {
 // Error reports an error to the telemetry server.
 func Error(err error, meta Metadata) {
 	errToLog := err // use errToLog to avoid shadowing err later. Use err to keep API clean.
-	if !started || errToLog == nil {
+
+	if !started || !usererr.ShouldLogError(errToLog) {
 		return
 	}
 
-	nixVersion := "unknown"
-	if v, err := nix.Version(); err == nil {
-		nixVersion = v.Version
-	}
+	nixVersion := cmp.Or(nix.Version(), "unknown")
 
 	event := &sentry.Event{
 		EventID:   sentry.EventID(ExecutionID),

@@ -16,8 +16,8 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
-	"go.jetpack.io/devbox/internal/fileutil"
-	"go.jetpack.io/devbox/internal/xdg"
+	"go.jetify.com/devbox/internal/fileutil"
+	"go.jetify.com/devbox/internal/xdg"
 )
 
 // EnsureNixpkgsPrefetched runs the prefetch step to download the flake of the registry
@@ -38,7 +38,7 @@ func EnsureNixpkgsPrefetched(w io.Writer, commit string) error {
 	}
 
 	fmt.Fprintf(w, "Ensuring nixpkgs registry is downloaded.\n")
-	cmd := command(
+	cmd := Command(
 		"flake", "prefetch",
 		FlakeNixpkgs(commit),
 	)
@@ -72,7 +72,7 @@ func nixpkgsCommitFileContents() (map[string]string, error) {
 
 func saveToNixpkgsCommitFile(commit string, commitToLocation map[string]string) error {
 	// Make a query to get the /nix/store path for this commit hash.
-	cmd := command("flake", "prefetch", "--json",
+	cmd := Command("flake", "prefetch", "--json",
 		FlakeNixpkgs(commit),
 	)
 	out, err := cmd.Output(context.TODO())

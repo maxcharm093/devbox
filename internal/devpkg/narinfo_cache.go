@@ -13,11 +13,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/pkg/errors"
-	"go.jetpack.io/devbox/internal/debug"
-	"go.jetpack.io/devbox/internal/devbox/providers/nixcache"
-	"go.jetpack.io/devbox/internal/goutil"
-	"go.jetpack.io/devbox/internal/lock"
-	"go.jetpack.io/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/debug"
+	"go.jetify.com/devbox/internal/devbox/providers/nixcache"
+	"go.jetify.com/devbox/internal/goutil"
+	"go.jetify.com/devbox/internal/lock"
+	"go.jetify.com/devbox/internal/nix"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -72,14 +72,6 @@ func FillNarInfoCache(ctx context.Context, packages ...*Package) error {
 	if len(eligiblePackages) == 0 {
 		return nil
 	}
-
-	// Pre-compute values read in fillNarInfoCache
-	// so they can be read from multiple go-routines without locks
-	_, err := nix.Version()
-	if err != nil {
-		return err
-	}
-	_ = nix.System()
 
 	group, _ := errgroup.WithContext(ctx)
 	for _, p := range eligiblePackages {
@@ -219,8 +211,8 @@ func (p *Package) outputsForOutputName(output string) ([]lock.Output, error) {
 // the package to query it from the binary cache.
 func (p *Package) isEligibleForBinaryCache() (bool, error) {
 	defer debug.FunctionTimer().End()
-	// Patched glibc packages are not in the binary cache.
-	if p.PatchGlibc() {
+	// Patched packages are not in the binary cache.
+	if p.Patch {
 		return false, nil
 	}
 	sysInfo, err := p.sysInfoIfExists()
@@ -240,14 +232,9 @@ func (p *Package) sysInfoIfExists() (*lock.SystemInfo, error) {
 		return nil, nil
 	}
 
-	version, err := nix.Version()
-	if err != nil {
-		return nil, err
-	}
-
 	// disable for nix < 2.17
-	if !version.AtLeast(nix.Version2_17) {
-		return nil, err
+	if !nix.AtLeast(nix.Version2_17) {
+		return nil, nil
 	}
 
 	entry, err := p.lockfile.Resolve(p.Raw)
@@ -255,14 +242,12 @@ func (p *Package) sysInfoIfExists() (*lock.SystemInfo, error) {
 		return nil, err
 	}
 
-	userSystem := nix.System()
-
 	if entry.Systems == nil {
 		return nil, nil
 	}
 
 	// Check if the user's system's info is present in the lockfile
-	sysInfo, ok := entry.Systems[userSystem]
+	sysInfo, ok := entry.Systems[nix.System()]
 	if !ok {
 		return nil, nil
 	}

@@ -10,12 +10,12 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
-	"go.jetpack.io/devbox/internal/build"
-	"go.jetpack.io/devbox/internal/devbox"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/devbox/providers/identity"
-	"go.jetpack.io/devbox/internal/ux"
-	"go.jetpack.io/pkg/api"
+	"go.jetify.com/devbox/internal/build"
+	"go.jetify.com/devbox/internal/devbox"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/devbox/providers/identity"
+	"go.jetify.com/devbox/internal/ux"
+	"go.jetify.com/pkg/api"
 )
 
 func authCmd() *cobra.Command {
@@ -96,8 +96,15 @@ func whoAmICmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return box.UninitializedSecrets(cmd.Context()).
+			// TODO: WhoAmI should be a function in opensource/pkg/auth that takes in a session.
+			// That way we don't need to handle failed refresh token errors here.
+			err = box.UninitializedSecrets(cmd.Context()).
 				WhoAmI(cmd.Context(), cmd.OutOrStdout(), flags.showTokens)
+			if identity.IsRefreshTokenError(err) {
+				ux.Fwarningf(cmd.ErrOrStderr(), "Your session is expired. Please login again.\n")
+				return loginCmd().RunE(cmd, args)
+			}
+			return err
 		},
 	}
 
@@ -144,13 +151,14 @@ func authNewTokenCommand() *cobra.Command {
 			}
 			ux.Fsuccessf(cmd.OutOrStdout(), "Token created.\n\n")
 			table := tablewriter.NewWriter(cmd.OutOrStdout())
-			table.SetRowLine(true)
-			table.AppendBulk([][]string{
+			// Row lines are configured through the renderer in the new API
+			if err := table.Bulk([][]string{
 				{"Token ID", pat.GetToken().GetId()},
 				{"Secret", pat.GetToken().GetSecret()},
-			})
-			table.Render()
-			return nil
+			}); err != nil {
+				return err
+			}
+			return table.Render()
 		},
 	}
 

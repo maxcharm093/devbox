@@ -11,9 +11,10 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"go.jetpack.io/devbox/internal/devpkg"
-	"go.jetpack.io/devbox/internal/lock"
-	"go.jetpack.io/devbox/internal/searcher"
+	"go.jetify.com/devbox/internal/devpkg"
+	"go.jetify.com/devbox/internal/lock"
+	"go.jetify.com/devbox/internal/searcher"
+	"go.jetify.com/devbox/nix/flake"
 )
 
 // update overwrites golden files with the new test results.
@@ -26,14 +27,14 @@ func TestWriteFromTemplate(t *testing.T) {
 	t.Setenv("__DEVBOX_NIX_SYSTEM", "x86_64-linux")
 	dir := filepath.Join(t.TempDir(), "makeme")
 	outPath := filepath.Join(dir, "flake.nix")
-	err := writeFromTemplate(dir, testFlakeTmplPlan, "flake.nix", "flake.nix")
+	_, err := writeFromTemplate(dir, testFlakeTmplPlan, "flake.nix", "flake.nix")
 	if err != nil {
 		t.Fatal("got error writing flake template:", err)
 	}
 	cmpGoldenFile(t, outPath, "testdata/flake.nix.golden")
 
 	t.Run("WriteUnmodified", func(t *testing.T) {
-		err = writeFromTemplate(dir, testFlakeTmplPlan, "flake.nix", "flake.nix")
+		_, err = writeFromTemplate(dir, testFlakeTmplPlan, "flake.nix", "flake.nix")
 		if err != nil {
 			t.Fatal("got error writing flake template:", err)
 		}
@@ -41,15 +42,11 @@ func TestWriteFromTemplate(t *testing.T) {
 	})
 	t.Run("WriteModifiedSmaller", func(t *testing.T) {
 		emptyPlan := &flakePlan{
-			NixpkgsInfo: &NixpkgsInfo{
-				URL:    "",
-				TarURL: "",
-			},
 			Packages:    []*devpkg.Package{},
 			FlakeInputs: []flakeInput{},
 			System:      "x86_64-linux",
 		}
-		err = writeFromTemplate(dir, emptyPlan, "flake.nix", "flake.nix")
+		_, err = writeFromTemplate(dir, emptyPlan, "flake.nix", "flake.nix")
 		if err != nil {
 			t.Fatal("got error writing flake template:", err)
 		}
@@ -89,15 +86,11 @@ If the new file is correct, you can update the golden file with:
 var (
 	locker            = &lockmock{}
 	testFlakeTmplPlan = &flakePlan{
-		NixpkgsInfo: &NixpkgsInfo{
-			URL:    "https://github.com/nixos/nixpkgs/archive/b9c00c1d41ccd6385da243415299b39aa73357be.tar.gz",
-			TarURL: "", // TODO savil
-		},
 		Packages: []*devpkg.Package{}, // TODO savil
 		FlakeInputs: []flakeInput{
 			{
 				Name: "nixpkgs",
-				URL:  "github:NixOS/nixpkgs/b9c00c1d41ccd6385da243415299b39aa73357be",
+				Ref:  flake.Ref{Type: flake.TypeGitHub, Owner: "NixOS", Repo: "nixpkgs", Rev: "b9c00c1d41ccd6385da243415299b39aa73357be"},
 				Packages: []*devpkg.Package{
 					devpkg.PackageFromStringWithDefaults("php@latest", locker),
 					devpkg.PackageFromStringWithDefaults("php81Packages.composer@latest", locker),
@@ -137,14 +130,6 @@ func (*lockmock) Resolve(pkg string) (*lock.Package, error) {
 	}, nil
 }
 
-func (*lockmock) Get(pkg string) *lock.Package {
-	return nil
-}
-
-func (*lockmock) LegacyNixpkgsPath(pkg string) string {
-	return ""
-}
-
-func (*lockmock) ProjectDir() string {
-	return ""
-}
+func (*lockmock) Get(pkg string) *lock.Package { return nil }
+func (*lockmock) Stdenv() flake.Ref            { return flake.Ref{} }
+func (*lockmock) ProjectDir() string           { return "" }

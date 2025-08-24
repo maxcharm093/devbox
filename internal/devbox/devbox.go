@@ -23,28 +23,30 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.jetpack.io/devbox/internal/boxcli/usererr"
-	"go.jetpack.io/devbox/internal/cachehash"
-	"go.jetpack.io/devbox/internal/cmdutil"
-	"go.jetpack.io/devbox/internal/conf"
-	"go.jetpack.io/devbox/internal/debug"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/devbox/envpath"
-	"go.jetpack.io/devbox/internal/devbox/generate"
-	"go.jetpack.io/devbox/internal/devconfig"
-	"go.jetpack.io/devbox/internal/devpkg"
-	"go.jetpack.io/devbox/internal/devpkg/pkgtype"
-	"go.jetpack.io/devbox/internal/envir"
-	"go.jetpack.io/devbox/internal/fileutil"
-	"go.jetpack.io/devbox/internal/lock"
-	"go.jetpack.io/devbox/internal/nix"
-	"go.jetpack.io/devbox/internal/plugin"
-	"go.jetpack.io/devbox/internal/redact"
-	"go.jetpack.io/devbox/internal/searcher"
-	"go.jetpack.io/devbox/internal/services"
-	"go.jetpack.io/devbox/internal/shellgen"
-	"go.jetpack.io/devbox/internal/telemetry"
-	"go.jetpack.io/devbox/internal/ux"
+	"go.jetify.com/devbox/internal/boxcli/usererr"
+	"go.jetify.com/devbox/internal/cachehash"
+	"go.jetify.com/devbox/internal/cmdutil"
+	"go.jetify.com/devbox/internal/conf"
+	"go.jetify.com/devbox/internal/debug"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/devbox/envpath"
+	"go.jetify.com/devbox/internal/devbox/generate"
+	"go.jetify.com/devbox/internal/devconfig"
+	"go.jetify.com/devbox/internal/devconfig/configfile"
+	"go.jetify.com/devbox/internal/devpkg"
+	"go.jetify.com/devbox/internal/devpkg/pkgtype"
+	"go.jetify.com/devbox/internal/envir"
+	"go.jetify.com/devbox/internal/fileutil"
+	"go.jetify.com/devbox/internal/lock"
+	"go.jetify.com/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/plugin"
+	"go.jetify.com/devbox/internal/redact"
+	"go.jetify.com/devbox/internal/searcher"
+	"go.jetify.com/devbox/internal/services"
+	"go.jetify.com/devbox/internal/shellgen"
+	"go.jetify.com/devbox/internal/telemetry"
+	"go.jetify.com/devbox/internal/ux"
+	"go.jetify.com/devbox/nix/flake"
 )
 
 const (
@@ -71,8 +73,17 @@ type Devbox struct {
 
 var legacyPackagesWarningHasBeenShown = false
 
-func InitConfig(dir string) (bool, error) {
-	return devconfig.Init(dir)
+func InitConfig(dir string) error {
+	_, err := devconfig.Init(dir)
+	return err
+}
+
+func EnsureConfig(dir string) error {
+	err := InitConfig(dir)
+	if err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return nil
 }
 
 func Open(opts *devopt.Opts) (*Devbox, error) {
@@ -105,7 +116,7 @@ func Open(opts *devopt.Opts) (*Devbox, error) {
 		cfg:                      cfg,
 		env:                      opts.Env,
 		environment:              environment,
-		nix:                      &nix.Nix{},
+		nix:                      &nix.NixInstance{},
 		projectDir:               filepath.Dir(cfg.Root.AbsRootPath),
 		pluginManager:            plugin.NewManager(),
 		stderr:                   opts.Stderr,
@@ -154,8 +165,9 @@ func Open(opts *devopt.Opts) (*Devbox, error) {
 		}
 		ux.Fwarningf(
 			os.Stderr, // Always stderr. box.writer should probably always be err.
-			"Your devbox.json contains packages in legacy format. "+
+			"Your devbox.json at %s contains packages in legacy format. "+
 				"Please run `devbox %supdate` to update your devbox.json.\n",
+			box.projectDir,
 			lo.Ternary(box.projectDir == globalPath, "global ", ""),
 		)
 	}
@@ -192,8 +204,14 @@ func (d *Devbox) ConfigHash() (string, error) {
 	return cachehash.Bytes(buf.Bytes()), nil
 }
 
-func (d *Devbox) NixPkgsCommitHash() string {
-	return d.cfg.NixPkgsCommitHash()
+func (d *Devbox) Stdenv() flake.Ref {
+	return flake.Ref{
+		Type:  flake.TypeGitHub,
+		Owner: "NixOS",
+		Repo:  "nixpkgs",
+		Ref:   "nixpkgs-unstable",
+		Rev:   d.cfg.NixPkgsCommitHash(),
+	}
 }
 
 func (d *Devbox) Generate(ctx context.Context) error {
@@ -231,7 +249,7 @@ func (d *Devbox) Shell(ctx context.Context, envOpts devopt.EnvOptions) error {
 		WithShellStartTime(telemetry.ShellStart()),
 	}
 
-	shell, err := NewDevboxShell(d, envOpts, opts...)
+	shell, err := d.newShell(envOpts, opts...)
 	if err != nil {
 		return err
 	}
@@ -270,7 +288,16 @@ func (d *Devbox) RunScript(ctx context.Context, envOpts devopt.EnvOptions, cmdNa
 	// better alternative since devbox run and devbox shell are not the same.
 	env["DEVBOX_SHELL_ENABLED"] = "1"
 
-	// wrap the arg in double-quotes, and escape any double-quotes inside it
+	// wrap the arg in double-quotes, and escape any double-quotes inside it.
+	//
+	// TODO(gcurtis): this breaks quote-removal in parameter expansion,
+	// command substitution, and arithmetic expansion:
+	//
+	//	$ unset x
+	//	$ echo ${x:-"my file"}
+	//	my file
+	//	$ devbox run -- echo '${x:-"my file"}'
+	//	"my file"
 	for idx, arg := range cmdArgs {
 		cmdArgs[idx] = strconv.Quote(arg)
 	}
@@ -278,7 +305,8 @@ func (d *Devbox) RunScript(ctx context.Context, envOpts devopt.EnvOptions, cmdNa
 	var cmdWithArgs []string
 	if _, ok := d.cfg.Scripts()[cmdName]; ok {
 		// it's a script, so replace the command with the script file's path.
-		cmdWithArgs = append([]string{shellgen.ScriptPath(d.ProjectDir(), cmdName)}, cmdArgs...)
+		script := shellgen.ScriptPath(d.ProjectDir(), cmdName)
+		cmdWithArgs = append([]string{strconv.Quote(script)}, cmdArgs...)
 	} else {
 		// Arbitrary commands should also run the hooks, so we write them to a file as well. However, if the
 		// command args include env variable evaluations, then they'll be evaluated _before_ the hooks run,
@@ -293,7 +321,8 @@ func (d *Devbox) RunScript(ctx context.Context, envOpts devopt.EnvOptions, cmdNa
 		if err != nil {
 			return err
 		}
-		cmdWithArgs = []string{shellgen.ScriptPath(d.ProjectDir(), arbitraryCmdFilename)}
+		script := shellgen.ScriptPath(d.ProjectDir(), arbitraryCmdFilename)
+		cmdWithArgs = []string{strconv.Quote(script)}
 		env["DEVBOX_RUN_CMD"] = strings.Join(append([]string{cmdName}, cmdArgs...), " ")
 	}
 
@@ -317,6 +346,9 @@ func (d *Devbox) ListScripts() []string {
 		keys[i] = k
 		i++
 	}
+
+	slices.Sort(keys)
+
 	return keys
 }
 
@@ -330,22 +362,7 @@ func (d *Devbox) EnvExports(ctx context.Context, opts devopt.EnvExportsOpts) (st
 	var envs map[string]string
 	var err error
 
-	if opts.DontRecomputeEnvironment {
-		upToDate, _ := d.lockfile.IsUpToDateAndInstalled(isFishShell())
-		if !upToDate {
-			ux.FHidableWarning(
-				ctx,
-				d.stderr,
-				StateOutOfDateMessage,
-				d.refreshAliasOrCommand(),
-			)
-		}
-
-		envs, err = d.computeEnv(ctx, true /*usePrintDevEnvCache*/, opts.EnvOptions)
-	} else {
-		envs, err = d.ensureStateIsUpToDateAndComputeEnv(ctx, opts.EnvOptions)
-	}
-
+	envs, err = d.ensureStateIsUpToDateAndComputeEnv(ctx, opts.EnvOptions)
 	if err != nil {
 		return "", err
 	}
@@ -353,7 +370,7 @@ func (d *Devbox) EnvExports(ctx context.Context, opts devopt.EnvExportsOpts) (st
 	envStr := exportify(envs)
 
 	if opts.RunHooks {
-		hooksStr := ". " + shellgen.ScriptPath(d.ProjectDir(), shellgen.HooksFilename)
+		hooksStr := ". \"" + shellgen.ScriptPath(d.ProjectDir(), shellgen.HooksFilename) + "\""
 		envStr = fmt.Sprintf("%s\n%s;\n", envStr, hooksStr)
 	}
 
@@ -798,23 +815,35 @@ func (d *Devbox) ensureStateIsUpToDateAndComputeEnv(
 ) (map[string]string, error) {
 	defer debug.FunctionTimer().End()
 
-	// When ensureStateIsUpToDate is called with ensure=true, it always
-	// returns early if the lockfile is up to date. So we don't need to check here
-	if err := d.ensureStateIsUpToDate(ctx, ensure); isConnectionError(err) {
-		if !fileutil.Exists(d.nixPrintDevEnvCachePath()) {
-			ux.Ferrorf(
+	upToDate, err := d.lockfile.IsUpToDateAndInstalled(isFishShell())
+	if err != nil {
+		return nil, err
+	}
+	if !upToDate {
+		if envOpts.Hooks.OnStaleState != nil {
+			envOpts.Hooks.OnStaleState()
+		}
+	}
+
+	if !envOpts.SkipRecompute {
+		// When ensureStateIsUpToDate is called with ensure=true, it always
+		// returns early if the lockfile is up to date. So we don't need to check here
+		if err := d.ensureStateIsUpToDate(ctx, ensure); isConnectionError(err) {
+			if !fileutil.Exists(d.nixPrintDevEnvCachePath()) {
+				ux.Ferrorf(
+					d.stderr,
+					"Error connecting to the internet and no cached environment found. Aborting.\n",
+				)
+				return nil, err
+			}
+			ux.Fwarningf(
 				d.stderr,
-				"Error connecting to the internet and no cached environment found. Aborting.\n",
+				"Error connecting to the internet. Will attempt to use cached environment.\n",
 			)
+		} else if err != nil {
+			// Some other non connection error, just return it.
 			return nil, err
 		}
-		ux.Fwarningf(
-			d.stderr,
-			"Error connecting to the internet. Will attempt to use cached environment.\n",
-		)
-	} else if err != nil {
-		// Some other non connection error, just return it.
-		return nil, err
 	}
 
 	// Since ensureStateIsUpToDate calls computeEnv when not up do date,
@@ -846,6 +875,11 @@ func (d *Devbox) AllPackageNamesIncludingRemovedTriggerPackages() []string {
 		result = append(result, p.VersionedName())
 	}
 	return result
+}
+
+func (d *Devbox) AllPackagesIncludingRemovedTriggerPackages() []*devpkg.Package {
+	packages := d.cfg.Packages(true /*includeRemovedTriggerPackages*/)
+	return devpkg.PackagesFromConfig(packages, d.lockfile)
 }
 
 // AllPackages returns the packages that are defined in devbox.json and
@@ -984,9 +1018,9 @@ func (d *Devbox) configEnvs(
 		}
 	} else if d.cfg.Root.EnvFrom != "" {
 		return nil, usererr.New(
-			"unknown from_env value: %s. Supported value is: %q.",
+			"unknown env_from value: %s. Supported values are: \"%q\" or a path to a file ending in \".env\"",
 			d.cfg.Root.EnvFrom,
-			"jetpack-cloud",
+			configfile.JetifyCloudEnvFromValue,
 		)
 	}
 	for k, v := range d.cfg.Env() {

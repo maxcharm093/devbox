@@ -6,20 +6,35 @@ package devbox
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/pkg/errors"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/devpkg"
-	"go.jetpack.io/devbox/internal/lock"
-	"go.jetpack.io/devbox/internal/nix"
-	"go.jetpack.io/devbox/internal/nix/nixprofile"
-	"go.jetpack.io/devbox/internal/plugin"
-	"go.jetpack.io/devbox/internal/searcher"
-	"go.jetpack.io/devbox/internal/shellgen"
-	"go.jetpack.io/devbox/internal/ux"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/devpkg"
+	"go.jetify.com/devbox/internal/lock"
+	"go.jetify.com/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/nix/nixprofile"
+	"go.jetify.com/devbox/internal/plugin"
+	"go.jetify.com/devbox/internal/searcher"
+	"go.jetify.com/devbox/internal/shellgen"
+	"go.jetify.com/devbox/internal/ux"
 )
 
 func (d *Devbox) Update(ctx context.Context, opts devopt.UpdateOpts) error {
+	if len(opts.Pkgs) == 0 || slices.Contains(opts.Pkgs, "nixpkgs") {
+		if err := d.lockfile.UpdateStdenv(); err != nil {
+			return err
+		}
+		// if nixpkgs is the only package to update, just return here.
+		if len(opts.Pkgs) == 1 {
+			return nil
+		}
+		// Otherwise, remove nixpkgs and continue
+		opts.Pkgs = slices.DeleteFunc(opts.Pkgs, func(pkg string) bool {
+			return pkg == "nixpkgs"
+		})
+	}
+
 	inputs, err := d.inputsToUpdate(opts)
 	if err != nil {
 		return err
@@ -65,7 +80,11 @@ func (d *Devbox) Update(ctx context.Context, opts devopt.UpdateOpts) error {
 		}
 	}
 
-	if err := d.ensureStateIsUpToDate(ctx, update); err != nil {
+	mode := update
+	if opts.NoInstall {
+		mode = noInstall
+	}
+	if err := d.ensureStateIsUpToDate(ctx, mode); err != nil {
 		return err
 	}
 

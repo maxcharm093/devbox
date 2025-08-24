@@ -2,6 +2,7 @@
 
 Basic Elixir project using Mix in Devbox.
 
+
 ## Configuration
 
 This project configures Hex and Mix to install packages + dependencies in local project directories. You can modify where these packages are installed by changing the variables in `conf/set-env.sh`

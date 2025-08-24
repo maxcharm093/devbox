@@ -6,7 +6,6 @@ Valkey can be configured automatically using Devbox's built in Valkey plugin. Th
 
 [**Example Repo**](https://github.com/jetify-com/devbox/tree/main/examples/databases/valkey)
 
-[![Open In Devbox.sh](https://www.jetify.com/img/devbox/open-in-devbox.svg)](https://devbox.sh/open/templates/valkey)
 
 ## Adding Valkey to your shell
 
@@ -36,7 +35,6 @@ The following helper files will be created in your project directory:
 
 * \{PROJECT_DIR\}/devbox.d/valkey/valkey.conf
 
-
 ### Environment Variables
 
 ```bash
@@ -51,3 +49,18 @@ Running `devbox services start valkey` will start valkey as a daemon in the back
 You can manually start Valkey in the foreground by running `valkey-server $VALKEY_CONF --port $VALKEY_PORT`.
 
 Logs, pidfile, and data dumps are stored in `.devbox/virtenv/valkey`. You can change this by modifying the `dir` directive in `devbox.d/valkey/valkey.conf`
+
+### Disabling the Valkey Plugin
+
+You can disable the Valkey plugin by running `devbox add valkey --disable-plugin`, or by setting the `disable_plugin` field in your `devbox.json`:
+
+```json
+{
+    "packages": {
+        "valkey": {
+            "version" : "latest",
+            "disable_plugin": true
+        }
+    }
+}
+```

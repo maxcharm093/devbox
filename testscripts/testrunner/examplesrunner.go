@@ -14,8 +14,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rogpeppe/go-internal/testscript"
 
-	"go.jetpack.io/devbox/internal/devconfig"
-	"go.jetpack.io/devbox/internal/envir"
+	"go.jetify.com/devbox/internal/devconfig"
+	"go.jetify.com/devbox/internal/envir"
 )
 
 // xdgStateHomeDir is the home directory for devbox state. We store symlinks to
@@ -90,7 +90,7 @@ func runSingleDevboxTestscript(t *testing.T, dir, projectDir string) {
 		t.Error(err)
 	}
 
-	params := getTestscriptParams(t, testscriptDir)
+	params := getTestscriptParams(testscriptDir)
 
 	// save a reference to the original params.Setup so that we can wrap it below
 	setup := params.Setup

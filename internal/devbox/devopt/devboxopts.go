@@ -18,8 +18,9 @@ type Opts struct {
 }
 
 type ProcessComposeOpts struct {
-	ExtraFlags []string
-	Background bool
+	ExtraFlags         []string
+	Background         bool
+	ProcessComposePort int
 }
 
 type GenerateOpts struct {
@@ -51,20 +52,20 @@ type AddOpts struct {
 	Platforms        []string
 	ExcludePlatforms []string
 	DisablePlugin    bool
-	PatchGlibc       bool
+	Patch            string
 	Outputs          []string
 }
 
 type UpdateOpts struct {
 	Pkgs                  []string
+	NoInstall             bool
 	IgnoreMissingPackages bool
 }
 
 type EnvExportsOpts struct {
-	DontRecomputeEnvironment bool
-	EnvOptions               EnvOptions
-	NoRefreshAlias           bool
-	RunHooks                 bool
+	EnvOptions     EnvOptions
+	NoRefreshAlias bool
+	RunHooks       bool
 }
 
 // EnvOptions configure the Devbox Environment in the `computeEnv` function.
@@ -72,7 +73,14 @@ type EnvExportsOpts struct {
 // like `shellenv`, `shell` and `run`.
 // - The struct is designed for the "common case" to be zero-initialized as `EnvOptions{}`.
 type EnvOptions struct {
+	Hooks             LifecycleHooks
 	OmitNixEnv        bool
 	PreservePathStack bool
 	Pure              bool
+	SkipRecompute     bool
+}
+
+type LifecycleHooks struct {
+	// OnStaleState is called when the Devbox state is out of date
+	OnStaleState func()
 }

@@ -12,9 +12,9 @@ import (
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 
-	"go.jetpack.io/devbox/internal/boxcli/usererr"
-	"go.jetpack.io/devbox/internal/searcher"
-	"go.jetpack.io/devbox/internal/ux"
+	"go.jetify.com/devbox/internal/boxcli/usererr"
+	"go.jetify.com/devbox/internal/searcher"
+	"go.jetify.com/devbox/internal/ux"
 )
 
 const trimmedVersionsLength = 10
@@ -33,7 +33,7 @@ func searchCmd() *cobra.Command {
 			query := args[0]
 			name, version, isVersioned := searcher.ParseVersionedPackage(query)
 			if !isVersioned {
-				results, err := searcher.Client().Search(query)
+				results, err := searcher.Client().Search(cmd.Context(), query)
 				if err != nil {
 					return err
 				}
@@ -104,7 +104,11 @@ func printSearchResults(
 		versionString := ""
 		if len(nonEmptyVersions) > 0 {
 			ellipses := lo.Ternary(resultsAreTrimmed && pkg.NumVersions > trimmedVersionsLength, " ...", "")
-			versionString = fmt.Sprintf(" (%s%s)", strings.Join(nonEmptyVersions, ", "), ellipses)
+			if showAll {
+				versionString = fmt.Sprintf("\n > %s \n", strings.Join(nonEmptyVersions, "\n > "))
+			} else {
+				versionString = fmt.Sprintf(" (%s%s)", strings.Join(nonEmptyVersions, ", "), ellipses)
+			}
 		}
 		fmt.Fprintf(w, "* %s %s\n", pkg.Name, versionString)
 	}

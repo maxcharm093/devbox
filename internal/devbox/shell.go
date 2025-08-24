@@ -16,15 +16,15 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/alessio/shellescape"
+	"al.essio.dev/pkg/shellescape"
 	"github.com/pkg/errors"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/shellgen"
-	"go.jetpack.io/devbox/internal/telemetry"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/shellgen"
+	"go.jetify.com/devbox/internal/telemetry"
 
-	"go.jetpack.io/devbox/internal/envir"
-	"go.jetpack.io/devbox/internal/nix"
-	"go.jetpack.io/devbox/internal/xdg"
+	"go.jetify.com/devbox/internal/envir"
+	"go.jetify.com/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/xdg"
 )
 
 //go:embed shellrc.tmpl
@@ -69,15 +69,15 @@ type DevboxShell struct {
 
 type ShellOption func(*DevboxShell)
 
-// NewDevboxShell initializes the DevboxShell struct so it can be used to start a shell environment
+// newShell initializes the DevboxShell struct so it can be used to start a shell environment
 // for the devbox project.
-func NewDevboxShell(devbox *Devbox, envOpts devopt.EnvOptions, opts ...ShellOption) (*DevboxShell, error) {
-	shPath, err := shellPath(devbox, envOpts)
+func (d *Devbox) newShell(envOpts devopt.EnvOptions, opts ...ShellOption) (*DevboxShell, error) {
+	shPath, err := d.shellPath(envOpts)
 	if err != nil {
 		return nil, err
 	}
 	sh := initShellBinaryFields(shPath)
-	sh.devbox = devbox
+	sh.devbox = d
 
 	for _, opt := range opts {
 		opt(sh)
@@ -88,7 +88,7 @@ func NewDevboxShell(devbox *Devbox, envOpts devopt.EnvOptions, opts ...ShellOpti
 }
 
 // shellPath returns the path to a shell binary, or error if none found.
-func shellPath(devbox *Devbox, envOpts devopt.EnvOptions) (path string, err error) {
+func (d *Devbox) shellPath(envOpts devopt.EnvOptions) (path string, err error) {
 	defer func() {
 		if err != nil {
 			path = filepath.Clean(path)
@@ -110,7 +110,7 @@ func shellPath(devbox *Devbox, envOpts devopt.EnvOptions) (path string, err erro
 
 	cmd := exec.Command(
 		"nix", "eval", "--raw",
-		fmt.Sprintf("%s#bashInteractive", nix.FlakeNixpkgs(devbox.cfg.NixPkgsCommitHash())),
+		fmt.Sprintf("%s#bashInteractive", d.Lockfile().Stdenv().String()),
 	)
 	cmd.Args = append(cmd.Args, nix.ExperimentalFlags()...)
 	out, err := cmd.Output()

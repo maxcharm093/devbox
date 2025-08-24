@@ -5,7 +5,6 @@ MariaDB can be automatically configured for your dev environment by Devbox via t
 
 [**Example Repo**](https://github.com/jetify-com/devbox/tree/main/examples/databases/mariadb)
 
-[![Open In Devbox.sh](https://www.jetify.com/img/devbox/open-in-devbox.svg)](https://devbox.sh/open/templates/mariadb)
 
 ## Adding MariaDB to your Shell
 
@@ -24,14 +23,15 @@ You can manually add the MariaDB Plugin to your `devbox.json` by adding it to yo
         "plugin:mariadb"
     ]
 ```
+
 This will install the latest version of MariaDB. You can find other installable versions of MariaDB by running `devbox search mariadb`. You can also view the available versions on [Nixhub](https://www.nixhub.io/packages/mariadb)
 
 ## MariaDB Plugin Support
 
 Devbox will automatically create the following configuration when you run `devbox add mariadb`. You can view the full configuration by running `devbox info mariadb`
 
-
 ### Services
+
 * mariadb
 
 You can use `devbox services up|stop mariadb` to start or stop the MariaDB Server.
@@ -66,5 +66,20 @@ These files are used to setup your database and service, and should not be modif
 ```json
 "env": {
     "MYSQL_UNIX_PORT": "/<some-other-path>/mysql.sock"
+}
+```
+
+### Disabling the MariaDB Plugin
+
+You can disable the MariaDB plugin by running `devbox add mariadb --disable-plugin`, or by setting the `disable_plugin` field in your `devbox.json`:
+
+```json
+{
+    "packages": {
+        "mariadb": {
+            "version": "latest",
+            "disable_plugin": true
+        }
+    }
 }
 ```

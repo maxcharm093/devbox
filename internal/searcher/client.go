@@ -13,9 +13,9 @@ import (
 	"runtime"
 
 	"github.com/pkg/errors"
-	"go.jetpack.io/devbox/internal/build"
-	"go.jetpack.io/devbox/internal/envir"
-	"go.jetpack.io/devbox/internal/redact"
+	"go.jetify.com/devbox/internal/build"
+	"go.jetify.com/devbox/internal/envir"
+	"go.jetify.com/devbox/internal/redact"
 )
 
 const searchAPIEndpoint = "https://search.devbox.sh"
@@ -32,7 +32,7 @@ func Client() *client {
 	}
 }
 
-func (c *client) Search(query string) (*SearchResults, error) {
+func (c *client) Search(ctx context.Context, query string) (*SearchResults, error) {
 	if query == "" {
 		return nil, fmt.Errorf("query should not be empty")
 	}
@@ -43,7 +43,7 @@ func (c *client) Search(query string) (*SearchResults, error) {
 	}
 	searchURL := endpoint + "?q=" + url.QueryEscape(query)
 
-	return execGet[SearchResults](context.TODO(), searchURL)
+	return execGet[SearchResults](ctx, searchURL)
 }
 
 // Resolve calls the /resolve endpoint of the search service. This returns

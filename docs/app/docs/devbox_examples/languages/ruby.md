@@ -4,7 +4,6 @@ title: Ruby
 
 [**Example Repo**](https://github.com/jetify-com/devbox/tree/main/examples/development/ruby)
 
-[![Open In Devbox.sh](https://www.jetify.com/img/devbox/open-in-devbox.svg)](https://devbox.sh/open/templates/ruby)
 
 Ruby can be automatically configured by Devbox via the built-in Ruby Plugin. This plugin will activate automatically when you install Ruby 2.7 using `devbox add ruby`.
 
@@ -34,6 +33,24 @@ RUBY_CONFDIR={PROJECT_DIR}/.devbox/virtenv/ruby
 GEMRC={PROJECT_DIR}/.devbox/virtenv/ruby/.gemrc
 GEM_HOME={PROJECT_DIR}/.devbox/virtenv/ruby
 PATH={PROJECT_DIR}/.devbox/virtenv/ruby/bin:$PATH
+```
+
+### Disabling the Ruby Plugin
+
+You can disable the Ruby plugin by running `devbox add ruby --disable-plugin`, or by setting the `disable_plugin` field in your `devbox.json`:
+
+```json
+{
+    "packages": {
+        "ruby": {
+            "version": "3.1",
+            "disable_plugin": true
+        },
+        "bundler": {
+            "version": "latest",
+        }
+    },
+}
 ```
 
 ## Bundler

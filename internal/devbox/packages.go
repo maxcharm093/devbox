@@ -18,29 +18,67 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/devbox/providers/nixcache"
-	"go.jetpack.io/devbox/internal/devconfig"
-	"go.jetpack.io/devbox/internal/devconfig/configfile"
-	"go.jetpack.io/devbox/internal/devpkg"
-	"go.jetpack.io/devbox/internal/devpkg/pkgtype"
-	"go.jetpack.io/devbox/internal/lock"
-	"go.jetpack.io/devbox/internal/setup"
-	"go.jetpack.io/devbox/internal/shellgen"
-	"go.jetpack.io/devbox/internal/telemetry"
-	"go.jetpack.io/pkg/auth"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/devbox/providers/nixcache"
+	"go.jetify.com/devbox/internal/devconfig"
+	"go.jetify.com/devbox/internal/devconfig/configfile"
+	"go.jetify.com/devbox/internal/devpkg"
+	"go.jetify.com/devbox/internal/devpkg/pkgtype"
+	"go.jetify.com/devbox/internal/lock"
+	"go.jetify.com/devbox/internal/setup"
+	"go.jetify.com/devbox/internal/shellgen"
+	"go.jetify.com/devbox/internal/telemetry"
+	"go.jetify.com/devbox/nix/flake"
+	"go.jetify.com/pkg/auth"
 
-	"go.jetpack.io/devbox/internal/boxcli/usererr"
-	"go.jetpack.io/devbox/internal/debug"
-	"go.jetpack.io/devbox/internal/nix"
-	"go.jetpack.io/devbox/internal/plugin"
-	"go.jetpack.io/devbox/internal/ux"
+	"go.jetify.com/devbox/internal/boxcli/usererr"
+	"go.jetify.com/devbox/internal/debug"
+	"go.jetify.com/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/plugin"
+	"go.jetify.com/devbox/internal/ux"
 )
 
 const StateOutOfDateMessage = "Your devbox environment may be out of date. Run %s to update it.\n"
 
 // packages.go has functions for adding, removing and getting info about nix
 // packages
+
+type UpdateVersion struct {
+	Current string
+	Latest  string
+}
+
+// Outdated returns a map of package names to their available latest version.
+func (d *Devbox) Outdated(ctx context.Context) (map[string]UpdateVersion, error) {
+	lockfile := d.Lockfile()
+	outdatedPackages := map[string]UpdateVersion{}
+	var warnings []string
+
+	for _, pkg := range d.AllPackages() {
+		// For non-devbox packages, like flakes, we can skip for now
+		if !pkg.IsDevboxPackage {
+			continue
+		}
+
+		lockPackage, err := lockfile.FetchResolvedPackage(pkg.Versioned())
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("Note: unable to check updates for %s", pkg.CanonicalName()))
+			continue
+		}
+		existingLockPackage := lockfile.Packages[pkg.Raw]
+		if lockPackage.Version == existingLockPackage.Version {
+			continue
+		}
+
+		outdatedPackages[pkg.Versioned()] = UpdateVersion{Current: existingLockPackage.Version, Latest: lockPackage.Version}
+	}
+
+	for _, warning := range warnings {
+		fmt.Fprintf(d.stderr, "%s\n", warning)
+	}
+
+	return outdatedPackages, nil
+}
 
 // Add adds the `pkgs` to the config (i.e. devbox.json) and nix profile for this
 // devbox project
@@ -101,10 +139,17 @@ func (d *Devbox) Add(ctx context.Context, pkgsNames []string, opts devopt.AddOpt
 			// This means it didn't validate and we don't want to fallback to legacy
 			// Just propagate the error.
 			return err
-		} else if _, err := nix.Search(d.lockfile.LegacyNixpkgsPath(pkg.Raw)); err != nil {
-			// This means it looked like a devbox package or attribute path, but we
-			// could not find it in search or in the legacy nixpkgs path.
-			return usererr.New("Package %s not found", pkg.Raw)
+		} else {
+			installable := flake.Installable{
+				Ref:      d.lockfile.Stdenv(),
+				AttrPath: pkg.Raw,
+			}
+			_, err := nix.Search(installable.String())
+			if err != nil {
+				// This means it looked like a devbox package or attribute path, but we
+				// could not find it in search or in the legacy nixpkgs path.
+				return usererr.New("Package %s not found", pkg.Raw)
+			}
 		}
 
 		ux.Finfof(d.stderr, "Adding package %q to devbox.json\n", packageNameForConfig)
@@ -142,9 +187,11 @@ func (d *Devbox) setPackageOptions(pkgs []string, opts devopt.AddOpts) error {
 			pkg, opts.DisablePlugin); err != nil {
 			return err
 		}
-		if err := d.cfg.PackageMutator().SetPatchGLibc(
-			pkg, opts.PatchGlibc); err != nil {
-			return err
+		if opts.Patch != "" {
+			if err := d.cfg.PackageMutator().SetPatch(
+				pkg, configfile.PatchMode(opts.Patch)); err != nil {
+				return err
+			}
 		}
 		if err := d.cfg.PackageMutator().SetOutputs(
 			d.stderr, pkg, opts.Outputs); err != nil {
@@ -234,8 +281,9 @@ const (
 	install   installMode = "install"
 	uninstall installMode = "uninstall"
 	// update is both install new package version and uninstall old package version
-	update installMode = "update"
-	ensure installMode = "ensure"
+	update    installMode = "update"
+	ensure    installMode = "ensure"
+	noInstall installMode = "noInstall"
 )
 
 // ensureStateIsUpToDate ensures the Devbox project state is up to date.
@@ -301,7 +349,7 @@ func (d *Devbox) ensureStateIsUpToDate(ctx context.Context, mode installMode) er
 			ctx,
 			d.stderr,
 			StateOutOfDateMessage,
-			d.refreshAliasOrCommand(),
+			d.RefreshAliasOrCommand(),
 		)
 	}
 

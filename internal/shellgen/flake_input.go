@@ -9,41 +9,28 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
-	"go.jetpack.io/devbox/internal/devpkg"
-	"go.jetpack.io/devbox/internal/nix"
+	"go.jetify.com/devbox/internal/devpkg"
+	"go.jetify.com/devbox/internal/nix"
+	"go.jetify.com/devbox/nix/flake"
 )
 
-const glibcPatchFlakeRef = "path:./glibc-patch"
+var glibcPatchFlakeRef = flake.Ref{Type: flake.TypePath, Path: "./glibc-patch"}
 
 type flakeInput struct {
 	Name     string
 	Packages []*devpkg.Package
-	URL      string
-}
-
-// IsNixpkgs returns true if the input is a nixpkgs flake of the form:
-// github:NixOS/nixpkgs/...
-//
-// While there are many ways to specify this input, devbox always uses
-// github:NixOS/nixpkgs/<hash> as the URL. If the user wishes to reference nixpkgs
-// themselves, this function may not return true.
-func (f *flakeInput) IsNixpkgs() bool {
-	return nix.IsGithubNixpkgsURL(f.URL)
+	Ref      flake.Ref
 }
 
 func (f *flakeInput) HashFromNixPkgsURL() string {
-	if !f.IsNixpkgs() {
-		return ""
-	}
-	return nix.HashFromNixPkgsURL(f.URL)
+	return f.Ref.Rev
 }
 
 func (f *flakeInput) URLWithCaching() string {
-	if !f.IsNixpkgs() {
-		return f.URL
+	if !f.Ref.IsNixpkgs() {
+		return nix.FixInstallableArg(f.Ref.String())
 	}
-	hash := nix.HashFromNixPkgsURL(f.URL)
-	return getNixpkgsInfo(hash).URL
+	return getNixpkgsInfo(f.Ref.Rev).URL
 }
 
 func (f *flakeInput) PkgImportName() string {
@@ -84,7 +71,7 @@ func (f *flakeInput) BuildInputsForSymlinkJoin() ([]*SymlinkJoin, error) {
 			return nil, err
 		}
 
-		if pkg.PatchGlibc() {
+		if pkg.Patch {
 			return nil, errors.New("patch_glibc is not yet supported for packages with non-default outputs")
 		}
 
@@ -96,7 +83,7 @@ func (f *flakeInput) BuildInputsForSymlinkJoin() ([]*SymlinkJoin, error) {
 		joins = append(joins, &SymlinkJoin{
 			Name: pkg.String() + "-combined",
 			Paths: lo.Map(outputNames, func(outputName string, _ int) string {
-				if !f.IsNixpkgs() {
+				if !f.Ref.IsNixpkgs() {
 					return f.Name + "." + attributePath + "." + outputName
 				}
 				parts := strings.Split(attributePath, ".")
@@ -125,7 +112,7 @@ func (f *flakeInput) BuildInputs() ([]string, error) {
 		if attributePathErr != nil {
 			err = attributePathErr
 		}
-		if pkg.PatchGlibc() {
+		if pkg.Patch {
 			// When the package comes from the glibc flake, the
 			// "legacyPackages" portion of the attribute path
 			// becomes just "packages" (matching the standard flake
@@ -137,7 +124,7 @@ func (f *flakeInput) BuildInputs() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !f.IsNixpkgs() {
+	if !f.Ref.IsNixpkgs() {
 		return lo.Map(attributePaths, func(pkg string, _ int) string {
 			return f.Name + "." + pkg
 		}), nil
@@ -179,18 +166,25 @@ func flakeInputs(ctx context.Context, packages []*devpkg.Package) []flakeInput {
 		// Packages that need a glibc patch are assigned to the special
 		// glibc-patched flake input. This input refers to the
 		// glibc-patch.nix flake.
-		if pkg.PatchGlibc() {
-			nixpkgsGlibc := flakeInputs.getOrAppend(glibcPatchFlakeRef)
+		if pkg.Patch {
+			nixpkgsGlibc := flakeInputs.getOrAppend(glibcPatchFlakeRef.String())
 			nixpkgsGlibc.Name = "glibc-patch"
-			nixpkgsGlibc.URL = glibcPatchFlakeRef
+			nixpkgsGlibc.Ref = glibcPatchFlakeRef
 			nixpkgsGlibc.Packages = append(nixpkgsGlibc.Packages, pkg)
 			continue
 		}
 
-		pkgURL := pkg.URLForFlakeInput()
-		flake := flakeInputs.getOrAppend(pkgURL)
+		installable, err := pkg.FlakeInstallable()
+		if err != nil {
+			// I don't think this should happen at this point. The
+			// packages should already be resolved to valid nixpkgs
+			// packages.
+			slog.Debug("error resolving package to flake installable", "err", err)
+			continue
+		}
+		flake := flakeInputs.getOrAppend(installable.Ref.String())
 		flake.Name = pkg.FlakeInputName()
-		flake.URL = pkgURL
+		flake.Ref = installable.Ref
 
 		// TODO(gcurtis): is the uniqueness check necessary? We're
 		// comparing pointers.

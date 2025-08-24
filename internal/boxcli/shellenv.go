@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.jetpack.io/devbox/internal/devbox"
-	"go.jetpack.io/devbox/internal/devbox/devopt"
-	"go.jetpack.io/devbox/internal/ux"
+	"go.jetify.com/devbox/internal/devbox"
+	"go.jetify.com/devbox/internal/devbox/devopt"
+	"go.jetify.com/devbox/internal/ux"
 )
 
 type shellEnvCmdFlags struct {
@@ -116,11 +116,23 @@ func shellEnvFunc(
 	}
 
 	envStr, err := box.EnvExports(ctx, devopt.EnvExportsOpts{
-		DontRecomputeEnvironment: !flags.recomputeEnv,
 		EnvOptions: devopt.EnvOptions{
+			Hooks: devopt.LifecycleHooks{
+				OnStaleState: func() {
+					if !flags.recomputeEnv {
+						ux.FHidableWarning(
+							ctx,
+							cmd.ErrOrStderr(),
+							devbox.StateOutOfDateMessage,
+							box.RefreshAliasOrCommand(),
+						)
+					}
+				},
+			},
 			OmitNixEnv:        flags.omitNixEnv,
 			PreservePathStack: flags.preservePathStack,
 			Pure:              flags.pure,
+			SkipRecompute:     !flags.recomputeEnv,
 		},
 		NoRefreshAlias: flags.noRefreshAlias,
 		RunHooks:       flags.runInitHook,
